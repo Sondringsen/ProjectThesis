@@ -1,2 +1,5 @@
 *.txt
 *.csv
+**/__pycache__/
+project-thesis-env/
+!requirements.txt

@@ -4,3 +4,4 @@
 project-thesis-env/
 !requirements.txt
 *.png
+.DS_Store

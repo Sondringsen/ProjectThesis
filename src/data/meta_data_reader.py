@@ -42,11 +42,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # df = pd.read_csv("data/raw/polygon_tickers_messy.csv")
-    # df1 = pd.read_csv("data/raw/Wilshire-5000-Stocks.csv")
-    # df = df.merge(df1, how="inner", left_on="ticker", right_on="Ticker")
-    # df = df[["ticker", "name"]]
-    # print(df.shape)
     main()
-    # tom = get_data_single_ticker("TOM.OL", ["marketCap"])
-    # print(tom)

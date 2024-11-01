@@ -75,6 +75,15 @@ def grid_data(df: pd.DataFrame, time_freq: int):
     return df
 
 def add_features(df: pd.DataFrame):
+    """
+    Function to call for adding new features to the data.
+
+    Args: 
+        df (pd.DataFrame): dataframe to add features to.
+
+    Returns:
+        pd.DataFrame: dataframe with added features
+    """
     df = add_mid_price(df)
     return df
 
@@ -92,6 +101,38 @@ def process_single_file(df: pd.DataFrame):
     df = filter_time(df)
     
     return df
+
+def main_already_merged():
+    """
+    This main function assumes you already have merged quote and trade data. This was only used because the total
+    data on the external disk is computationally intensive to download and treat as it is 600GB in size. 
+    The merged data was already available under data/processed/tq_data.
+    """
+    input_dir = "data/processed/tq_data"
+    output_dir = "data/processed/tq_data_gridded"
+
+    df_tot = None
+    for filename in os.listdir(input_dir):
+        if filename.endswith(".csv"):
+            input_filepath = os.path.join(input_dir, filename)
+            print(f"Treating {input_filepath}")
+            
+            df = pd.read_csv(input_filepath)
+            df = process_single_file(df)
+            df = df.groupby(by="ticker").apply(lambda df: grid_data(df, time_freq), include_groups=False).reset_index()
+
+            if df_tot is None:
+                df_tot = df
+            else:
+                df_tot = pd.concat([df_tot, df])
+    
+    df_tot = df_tot.sort_values(by=["ticker", "sip_timestamp"])
+            
+    output_filename = "df_tot_gridded.csv"
+    output_filepath = os.path.join(output_dir, output_filename)
+    
+    df_tot.to_csv(output_filepath, index=False)
+    print(f"Processed and saved: {output_filepath}")
 
 def main():
     tickers = pd.read_csv("data/raw/random_tickers.csv")["ticker"]
@@ -121,4 +162,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    main_already_merged()

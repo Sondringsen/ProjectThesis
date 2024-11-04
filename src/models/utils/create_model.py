@@ -1,29 +1,27 @@
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras import Input
-
+from tensorflow.keras.layers import Input, LSTM, Dense, BatchNormalization
 
 def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int):
     """
-    Creates a stacked lstm model.
+    Creates a stacked LSTM model with a specified number of layers and units.
 
     Args:
-        n_layers (int): the number of lstm layers in the model.
-        units (int): the number of units per lstm layer.
-        seq_length (int): the length of the sequence considered in the lstm.
-        n_features (int): number of features in the x set.
+        n_layers (int): the number of LSTM layers in the model.
+        units (int): the number of units per LSTM layer.
+        seq_length (int): the length of the input sequence.
+        n_features (int): the number of features in each input sequence.
 
     Returns:
-        tf.Sequential: a model with lstm layers.
+        tf.keras.Sequential: A model with the specified number of LSTM layers.
     """
+    model = Sequential()
+    model.add(Input(shape=(seq_length, n_features)))
 
-    model = Sequential([
-        Input(shape=(seq_length, n_features)),
-        LSTM(32, activation='relu', return_sequences=True),
-        LSTM(32, activation='relu', return_sequences=False),
-        Dense(1)
-    ])
+    for i in range(n_layers):
+        return_sequences = i < n_layers - 1
+        model.add(LSTM(units, activation='relu', return_sequences=return_sequences))
+        model.add(BatchNormalization())
+
+    model.add(Dense(1))
 
     return model
-
-

@@ -1,12 +1,17 @@
 import numpy as np
+import pandas as pd
 
-a = np.array([])
-b = np.array([1, 2, 3])
-c = np.array([4, 5, 6, 7])
+def f1(x):
+    counter = 1
 
-print(c.flatten().shape)
-print(c.shape)
+    def f2():
+        nonlocal counter
+        counter += 1
 
-a = np.concatenate([a, b])
-a = np.concatenate([a, c])
-print(a)
+    for i in range(3):
+        f2()
+    return counter
+
+
+counter = f1(1)
+print(counter)

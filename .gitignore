@@ -6,3 +6,4 @@ project-thesis-env/
 *.png
 .DS_Store
 *.pkl
+*.keras

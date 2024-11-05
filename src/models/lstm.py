@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from utils.create_model import create_lstm
+from hyperopt import hp, fmin, tpe, space_eval
 
 def get_data():
     """
@@ -33,10 +34,10 @@ def get_dates_for_training_scheme(df: pd.DataFrame):
     date_set = []
 
     num_days_training = 4
-    num_days_val_test = 1
+    num_days_val_test = 2
 
     for i in range(len(dates) - num_days_training):
-        date_set.append((dates[i: i + 4], dates[i + 4: i + 4 + num_days_val_test]))
+        date_set.append((dates[i: i + num_days_training], dates[i + num_days_training: i + num_days_training + num_days_val_test]))
 
     return date_set
 
@@ -78,13 +79,37 @@ def create_sequences(data: np.ndarray, seq_length: int):
         y.append(data[i+seq_length, -1])     # last column as target
     return np.array(x), np.array(y)
 
+def create_sequences_modified(data, seq_length):
+    """
+    Convert DataFrame into sequences of specified length for LSTM input. Makes sure sequences do not 
+    contain data from different dates.
+
+    Args: 
+        data (np.array): complete data containing both x and y
+        seq_length (int): the length of the sequence considered in the lstm.
+
+    Returns:
+        (np.array, np.array): x and y datasets with the sequences. 
+    """
+    X, y = [], []
+    for date, group_data in data.groupby("date"):
+        group_data = group_data.drop(columns=["date"]).values
+        X_date, y_date = create_sequences(group_data, seq_length)
+        X.append(X_date)
+        y.append(y_date)
+    return np.concatenate(X), np.concatenate(y)
+
+
 def get_config_space():
     """
     Creates a hyperparamater space to search over in tuning the model.
+
+    Note:: Deprecated. Use external library hyperopt.
     """
-    seq_length = np.array([10])
-    layers = np.array([3, 5, 7])
-    units = np.array([8, 16, 32, 64])
+    seq_length = np.array([5, 10, 20])
+    layers = np.array([2, 3, 4])
+    units = np.array([4, 8, 16, 32])
+
     config_space = np.array(np.meshgrid(seq_length, layers, units)).T.reshape(-1, 3)
     
     config_names = ["seq_length", "n_layers", "units"]
@@ -128,36 +153,35 @@ def create_plot(ticker: str, ts: list[pd.Series], y_test: list[np.ndarray], y_pr
     plt.savefig(f"reports/plots/{ticker}_lstm.png")
 
 
-def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray]):
-    config_space = get_config_space()
-
+def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ticker: str):
+    config_space = {}
     config_loss = []
 
-    for index, config in config_space.items():
-        if index == 2:
-            break
+    config_key = 0
+
+    def objective(config):
+        nonlocal config_key
+        nonlocal config_space
+        nonlocal config_loss
+        config = {key: int(value) for key, value in config.items()} # the lstm only accepts dtype int, not np.int
+        
+        config_space[config_key] = config
+        config_key += 1
         y_val_total = np.array([])
         y_pred_total = np.array([])
 
-        # lstm_parameters = ["seq_length", "n_layers", "units"]
-        # config_lstm = {lstm_parameter: config[lstm_parameter] for lstm_parameter in lstm_parameters}
-        config = {key: int(value) for key, value in config.items()} # the lstm only accepts dtype int, not np.int
-        counter = 0
         for date_set in date_scheme:
-            if counter == 5:
-                break
-            counter += 1
             train, val = train_val_test(df, date_set)
             scaler = StandardScaler()
 
             train = train.drop(columns=["ticker", "sip_timestamp"])
             val = val.drop(columns=["ticker", "sip_timestamp"])
 
-            train = scaler.fit_transform(train)
-            val = scaler.transform(val)
+            train.loc[:, train.columns != "date"] = scaler.fit_transform(train.loc[:, train.columns != "date"])
+            val.loc[:, val.columns != "date"] = scaler.transform(val.loc[:, val.columns != "date"])
 
-            X_train, y_train = create_sequences(train, config["seq_length"])
-            X_val, y_val = create_sequences(val, config["seq_length"])
+            X_train, y_train = create_sequences_modified(train, config["seq_length"])
+            X_val, y_val = create_sequences_modified(val, config["seq_length"])
 
             config["n_features"] = X_train.shape[2]
 
@@ -174,11 +198,26 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray]):
 
         mse = np.mean((y_val_total - y_pred_total)**2)
         config_loss.append(mse)
-        
-    config_loss = np.array(config_loss)
-    best_config = config_space[np.argmin(config_loss)]
 
-    return best_config
+        return mse
+    
+    space = {
+        "n_layers": hp.quniform('num_layers', 2, 5, 1),
+        "units": hp.quniform("units", 4, 32, 4),
+        "seq_length": hp.quniform("seq_length", 5, 30, 5),
+    }
+
+    best_config_loss = fmin(objective, space, algo=tpe.suggest, max_evals=20)
+
+    config_loss_df = pd.DataFrame().from_dict(config_space, orient="index")
+    config_loss_df = config_loss_df
+    config_loss_df["mse"] = config_loss
+    config_loss_df["ticker"] = ticker
+
+    best_config_loss = np.array(config_loss)
+    best_config = config_space[np.argmin(best_config_loss)]
+
+    return best_config , config_loss_df
 
 
 def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], config: dict, loss_dic: dict, ticker: str):
@@ -187,30 +226,26 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
     y_test_plot = []
     y_test_total = np.array([])
     y_pred_total = np.array([])
-    # ts_test_total = np.array([], dtype='datetime64[s]')
 
     config = {key: int(value) for key, value in config.items()} # the lstm only accepts dtype int, not np.int
 
-    counter = 0
-    for date_set in date_scheme:
+    for counter, date_set in enumerate(date_scheme):
         if counter == 3:
             break
-        counter += 1
         train, test = train_val_test(df, date_set)
         scaler = StandardScaler()
 
         ts = pd.to_datetime(test["sip_timestamp"].iloc[config["seq_length"]:]) # used for plotting
-        # ts_test_total = np.concatenate([ts_test_total, ts])
         ts_plot.append(ts)
 
         train = train.drop(columns=["ticker", "sip_timestamp"])
         test = test.drop(columns=["ticker", "sip_timestamp"])
 
-        train = scaler.fit_transform(train)
-        test = scaler.transform(test)
+        train.loc[:, train.columns != "date"] = scaler.fit_transform(train.loc[:, train.columns != "date"])
+        test.loc[:, test.columns != "date"] = scaler.transform(test.loc[:, test.columns != "date"])
 
-        X_train, y_train = create_sequences(train, config["seq_length"])
-        X_test, y_test = create_sequences(test, config["seq_length"])
+        X_train, y_train = create_sequences_modified(train, config["seq_length"])
+        X_test, y_test = create_sequences_modified(test, config["seq_length"])
 
         config["n_features"] = X_train.shape[2]
 
@@ -219,6 +254,7 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
 
         model.fit(X_train, y_train, epochs=20, batch_size=32)
         model.summary()
+        model.save(f"reports/models/{ticker}-{counter}.keras")
 
         y_pred = model.predict(X_test)
 
@@ -243,7 +279,7 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
     loss_dic["mse"].append(mse)
     loss_dic["rmse"].append(rmse)
     loss_dic["normalized rmse"].append(normalized_mse)
-    loss_dic["mae"].append(mae)  
+    loss_dic["mae"].append(mae)
 
     return loss_dic
 
@@ -254,29 +290,29 @@ def main():
     tickers = df["ticker"].unique()
     date_scheme = get_dates_for_training_scheme(df)
 
+    num_days_testing = 6
+    date_scheme_val = date_scheme[:-num_days_testing]
+    date_scheme_test = date_scheme[-num_days_testing:]
+
     loss_dic = {"ticker": [], "mse": [], "rmse": [], "normalized rmse": [], "mae": []}
 
-    num_days_testing = 6
+    tot_loss_config_df = pd.DataFrame(columns=["ticker", "seq_length", "n_layers", "units", "mse"])
 
-    i = 0
     for ticker in tickers:
-        if i == 3:
-            break
-        i += 1
         print(f"Analyzing {ticker}")
 
-        ticker_data = df[df["ticker"] == ticker]
+        ticker_data = df.loc[df["ticker"] == ticker, :].copy()
+        ticker_data.loc[:, "date"] = ticker_data["sip_timestamp"].dt.date
 
-        date_scheme_val = date_scheme[:-num_days_testing]
-        date_scheme_test = date_scheme[-num_days_testing:]
+        best_config, config_loss_df = tuning_part(ticker_data, date_scheme_val, ticker)
+        tot_loss_config_df = pd.concat([tot_loss_config_df, config_loss_df], ignore_index=True)
+        tot_loss_config_df.to_csv("reports/config_space_loss.csv")
 
-        # best_config = tuning_part(ticker_data, date_scheme_val)
-
-        best_config = {'seq_length': 10, 'n_layers': 3, 'units': 8}
         loss_dic = testing_part(ticker_data, date_scheme_test, best_config, loss_dic, ticker)
 
     df_loss = pd.DataFrame(loss_dic)
     create_loss_report(df_loss)
+
 
 
 if __name__ == "__main__":

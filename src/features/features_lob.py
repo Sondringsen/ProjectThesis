@@ -44,6 +44,7 @@ def add_mid_price(df: pd.DataFrame):
     df["mid_price"] = (df["bid_price"] + df["ask_price"]) / 2
     return df
 
+
 def add_first_hour_indicator(df: pd.DataFrame):
     """
     Adds the first hour of the trading day as an indicator variable. This is done
@@ -75,6 +76,7 @@ def add_last_hour_indicator(df: pd.DataFrame):
     df["last_hour_indicator"] = df["sip_timestamp"].dt.time >= last_hour
 
     return df
+
 
 def add_weighted_mid_price(df: pd.DataFrame):
     """
@@ -129,13 +131,31 @@ def add_features(df: pd.DataFrame):
 
     Returns:
         pd.DataFrame: dataframe with added features
+    
+    Note:: make sure to add target last
     """
-    df = add_first_hour_indicator(df)
-    df = add_last_hour_indicator(df)
-    # df = add_mid_price(df)
-    # make sure to add target last
-    df = add_weighted_mid_price(df)
+    # df = add_first_hour_indicator(df)
+    # df = add_last_hour_indicator(df)
+    df = add_mid_price(df)
+    # df = add_weighted_mid_price(df)
     return df
+
+def remove_features(df: pd.DataFrame):
+    """
+    Function to call for removing features of the data.
+
+    Args: 
+        df (pd.DataFrame): dataframe to remove features from.
+
+    Returns:
+        pd.DataFrame: dataframe with removed features
+    """
+    features_to_remove = ["ask_price", "bid_price", "ask_size", "bid_size", "last_trade_price", "last_trade_size"]
+    df = df.drop(columns=features_to_remove)
+
+    return df
+
+
 
 def process_single_file(df: pd.DataFrame):
     """
@@ -149,6 +169,7 @@ def process_single_file(df: pd.DataFrame):
     """
     df["sip_timestamp"] = pd.to_datetime(df["sip_timestamp"])
     df = add_features(df)
+    df = remove_features(df)
     df = filter_time(df)
     
     return df

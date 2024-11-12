@@ -1,9 +1,11 @@
-import pandas as pd
+import os
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
-from utils.create_model import create_lstm
+from utils.create_model import create_lstm, create_rnn
 from hyperopt import hp, fmin, tpe, space_eval
+from tensorflow.keras.callbacks import EarlyStopping
 
 def get_data():
     """
@@ -33,10 +35,10 @@ def get_dates_for_training_scheme(df: pd.DataFrame):
 
     date_set = []
 
-    num_days_training = 4
-    num_days_val_test = 2
+    num_days_training = 9
+    num_days_val_test = 1
 
-    for i in range(len(dates) - num_days_training):
+    for i in range(0, len(dates) - num_days_training, num_days_val_test):
         date_set.append((dates[i: i + num_days_training], dates[i + num_days_training: i + num_days_training + num_days_val_test]))
 
     return date_set
@@ -74,9 +76,9 @@ def create_sequences(data: np.ndarray, seq_length: int):
     """
     x, y = [], []
     for i in range(len(data) - seq_length):
-        # Create sequences of length `seq_length`
-        x.append(data[i:i+seq_length, :-1])  # all columns except the last for features
-        y.append(data[i+seq_length, -1])     # last column as target
+        x.append(data[i:i + seq_length, :])  # all columns, including the last one, as features
+        y.append(data[i + seq_length, -1])  # last column's lagged value as target
+
     return np.array(x), np.array(y)
 
 def create_sequences_modified(data, seq_length):
@@ -125,6 +127,7 @@ def create_loss_report(df_loss: pd.DataFrame):
     Args:
         df_loss (pd.DataFrame): a dataframe containing different loss metrics for all tickers.
     """
+    df_loss.to_csv("reports/tot_loss_lstm.csv", index=False)
     with open("reports/loss_tot_lstm.tex", "w") as file:
         file.write(df_loss.to_latex(index=False, header=True, float_format="%.4f", caption="Loss Metrics For All Tickers LSTM-model", label="tab:loss_total_lstm"))
 
@@ -141,13 +144,13 @@ def create_plot(ticker: str, ts: list[pd.Series], y_test: list[np.ndarray], y_pr
     """
     plt.figure(figsize=(12, 8))
     for ts, test, pred in zip(ts, y_test, y_pred):
-        plt.plot(ts, test, color = "red")
-        plt.plot(ts, pred, color = "blue")
-    plt.plot([], [], color="red", label="True values")
-    plt.plot([], [], color="blue", label="Predicted values")
+        plt.plot(ts, test, color = "red", alpha=0.5)
+        plt.plot(ts, pred, color = "blue", alpha=0.5)
+    plt.plot([], [], color="red", label="True values", alpha=0.5)
+    plt.plot([], [], color="blue", label="Predicted values", alpha=0.5)
     plt.legend()
-    plt.title(f"LSTM model prediction for {ticker} (min-max-scaled values)")
-    plt.ylabel("Midprice")
+    plt.title(f"LSTM model prediction for {ticker} (Standardized values)")
+    plt.ylabel("Weighted Midprice")
     plt.xlabel("Time")
 
     plt.savefig(f"reports/plots/{ticker}_lstm.png")
@@ -185,11 +188,13 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
 
             config["n_features"] = X_train.shape[2]
 
-            model = create_lstm(**config)
+            model = create_rnn(**config)
             model.compile(optimizer='adam', loss='mse')
 
-            model.fit(X_train, y_train, epochs=20, batch_size=32)
-            model.summary()
+            early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+            model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=5, batch_size=512, callbacks=[early_stopping], verbose=0)
+            # model.summary()
 
             y_pred = model.predict(X_val)
 
@@ -210,7 +215,6 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
     best_config_loss = fmin(objective, space, algo=tpe.suggest, max_evals=20)
 
     config_loss_df = pd.DataFrame().from_dict(config_space, orient="index")
-    config_loss_df = config_loss_df
     config_loss_df["mse"] = config_loss
     config_loss_df["ticker"] = ticker
 
@@ -230,13 +234,17 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
     config = {key: int(value) for key, value in config.items()} # the lstm only accepts dtype int, not np.int
 
     for counter, date_set in enumerate(date_scheme):
-        if counter == 3:
-            break
         train, test = train_val_test(df, date_set)
         scaler = StandardScaler()
 
-        ts = pd.to_datetime(test["sip_timestamp"].iloc[config["seq_length"]:]) # used for plotting
-        ts_plot.append(ts)
+        daily_groups = test.groupby(test["sip_timestamp"].dt.date)
+
+        plot_splits = [0]
+        for _, group in daily_groups:
+            ts_plot.append(group["sip_timestamp"].iloc[config["seq_length"]:])
+            plot_splits.append(group["sip_timestamp"].iloc[config["seq_length"]:].shape[0])
+
+        plot_splits = np.cumsum(np.array(plot_splits))
 
         train = train.drop(columns=["ticker", "sip_timestamp"])
         test = test.drop(columns=["ticker", "sip_timestamp"])
@@ -249,21 +257,21 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
 
         config["n_features"] = X_train.shape[2]
 
-        model = create_lstm(**config)
+        model = create_rnn(**config)
         model.compile(optimizer='adam', loss='mse')
 
-        model.fit(X_train, y_train, epochs=20, batch_size=32)
+        model.fit(X_train, y_train, epochs=10, batch_size=512, verbose=0)
         model.summary()
         model.save(f"reports/models/{ticker}-{counter}.keras")
 
-        y_pred = model.predict(X_test)
+        y_pred = model.predict(X_test).flatten()
 
-        y_pred_total = np.concatenate([y_pred_total, y_pred.flatten()])
+        y_pred_total = np.concatenate([y_pred_total, y_pred])
         y_test_total = np.concatenate([y_test_total, y_test])
 
-        y_pred_plot.append(y_pred)
-        y_test_plot.append(y_test)
-
+        for i in range(plot_splits.shape[0] - 1):
+            y_pred_plot.append(y_pred[plot_splits[i]: plot_splits[i + 1]])
+            y_test_plot.append(y_test[plot_splits[i]: plot_splits[i + 1]])
 
     create_plot(ticker, ts_plot, y_test_plot, y_pred_plot)
 
@@ -278,7 +286,7 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
     loss_dic["ticker"].append(ticker)
     loss_dic["mse"].append(mse)
     loss_dic["rmse"].append(rmse)
-    loss_dic["normalized rmse"].append(normalized_mse)
+    loss_dic["normalized_rmse"].append(normalized_mse)
     loss_dic["mae"].append(mae)
 
     return loss_dic
@@ -290,32 +298,43 @@ def main():
     tickers = df["ticker"].unique()
     date_scheme = get_dates_for_training_scheme(df)
 
-    num_days_testing = 6
+    num_days_testing = 4
     date_scheme_val = date_scheme[:-num_days_testing]
     date_scheme_test = date_scheme[-num_days_testing:]
 
-    loss_dic = {"ticker": [], "mse": [], "rmse": [], "normalized rmse": [], "mae": []}
-
-    tot_loss_config_df = pd.DataFrame(columns=["ticker", "seq_length", "n_layers", "units", "mse"])
+    if os.path.isfile("reports/config_space_loss.csv"):
+        tot_loss_config_df = pd.read_csv("reports/config_space_loss.csv", index_col=False)
+    else:
+        tot_loss_config_df = pd.DataFrame(columns=["ticker", "seq_length", "n_layers", "units", "mse"])
+    
+    if os.path.isfile("reports/tot_loss_lstm.csv"):
+        df_loss = pd.read_csv("reports/tot_loss_lstm.csv")
+        loss_dic = df_loss.to_dict(orient="list")
+    else:
+        loss_dic = {"ticker": [], "mse": [], "rmse": [], "normalized_rmse": [], "mae": []}
 
     for ticker in tickers:
-        print(f"Analyzing {ticker}")
-
+        if ticker in loss_dic["ticker"]:
+            continue
+        
+        print(ticker)
         ticker_data = df.loc[df["ticker"] == ticker, :].copy()
         ticker_data.loc[:, "date"] = ticker_data["sip_timestamp"].dt.date
 
         best_config, config_loss_df = tuning_part(ticker_data, date_scheme_val, ticker)
+
         tot_loss_config_df = pd.concat([tot_loss_config_df, config_loss_df], ignore_index=True)
-        tot_loss_config_df.to_csv("reports/config_space_loss.csv")
+        tot_loss_config_df.to_csv("reports/config_space_loss.csv", index=False)
 
         loss_dic = testing_part(ticker_data, date_scheme_test, best_config, loss_dic, ticker)
 
-    df_loss = pd.DataFrame(loss_dic)
-    create_loss_report(df_loss)
+        df_loss = pd.DataFrame(loss_dic)
+        create_loss_report(df_loss)
 
 
 
 if __name__ == "__main__":
+    # is currently running RNNs
     main()
     
     

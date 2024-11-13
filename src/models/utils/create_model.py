@@ -1,7 +1,8 @@
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, LSTM, Dense, BatchNormalization, SimpleRNN
+from tensorflow.keras import regularizers
 
-def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int):
+def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int, l2_reg: float):
     """
     Creates a stacked LSTM model with a specified number of layers and units.
 
@@ -10,6 +11,7 @@ def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int):
         units (int): the number of units per LSTM layer.
         seq_length (int): the length of the input sequence.
         n_features (int): the number of features in each input sequence.
+        l2_reg (float): the L2 regularization coefficient.
 
     Returns:
         tf.keras.Sequential: A model with the specified number of LSTM layers.
@@ -19,14 +21,14 @@ def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int):
 
     for i in range(n_layers):
         return_sequences = i < n_layers - 1
-        model.add(LSTM(units, activation='relu', return_sequences=return_sequences))
+        model.add(LSTM(units, activation='relu', return_sequences=return_sequences), regularizers.L2(l2_reg))
         model.add(BatchNormalization())
 
     model.add(Dense(1))
 
     return model
 
-def create_rnn(n_layers: int, units: int, seq_length: int, n_features: int):
+def create_rnn(n_layers: int, units: int, seq_length: int, n_features: int, l2_reg: float):
     """
     Creates a stacked RNN model with a specified number of layers and units.
 
@@ -35,6 +37,7 @@ def create_rnn(n_layers: int, units: int, seq_length: int, n_features: int):
         units (int): the number of units per RNN layer.
         seq_length (int): the length of the input sequence.
         n_features (int): the number of features in each input sequence.
+        l2_reg (float): the L2 regularization coefficient.
 
     Returns:
         tf.keras.Sequential: A model with the specified number of RNN layers.
@@ -44,7 +47,7 @@ def create_rnn(n_layers: int, units: int, seq_length: int, n_features: int):
 
     for i in range(n_layers):
         return_sequences = i < n_layers - 1
-        model.add(SimpleRNN(units, activation='relu', return_sequences=return_sequences))
+        model.add(SimpleRNN(units, activation='relu', return_sequences=return_sequences), regularizers.L2(l2_reg))
         model.add(BatchNormalization())
 
     model.add(Dense(1))

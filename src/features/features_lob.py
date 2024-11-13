@@ -154,6 +154,29 @@ def remove_features(df: pd.DataFrame):
     df = df.drop(columns=features_to_remove)
 
     return df
+import numpy as np
+
+def return_transformation(df: pd.DataFrame):
+    """
+    Transform the mid price time series into a log return series. Ensures that no returns span two days.
+
+    Args:
+        df (pd.DataFrame): DataFrame with a 'sip_timestamp' datetime column and 'mid_price' column.
+    
+    Returns:
+        pd.DataFrame: DataFrame with 'mid_price_log_return' values.
+    """
+    df["date"] = df["sip_timestamp"].dt.date
+    
+    df["mid_price"] = df["mid_price"].replace(0, np.nan)
+    df["mid_price"] = df.groupby("date")["mid_price"].ffill()
+
+    df["mid_price_log_return"] = df.groupby("date")["mid_price"].transform(lambda x: np.log(x / x.shift(1)))
+    
+    df = df.dropna(subset=["mid_price_log_return"]).reset_index(drop=True)
+    df = df.drop(columns=["date", "mid_price"])
+    
+    return df
 
 
 
@@ -171,6 +194,8 @@ def process_single_file(df: pd.DataFrame):
     df = add_features(df)
     df = remove_features(df)
     df = filter_time(df)
+    df = df.groupby(by="ticker").apply(lambda df: grid_data(df, time_freq), include_groups=False).reset_index()
+    df = return_transformation(df)
     
     return df
 
@@ -191,7 +216,7 @@ def main_already_merged():
             
             df = pd.read_csv(input_filepath)
             df = process_single_file(df)
-            df = df.groupby(by="ticker").apply(lambda df: grid_data(df, time_freq), include_groups=False).reset_index()
+            
 
             if df_tot is None:
                 df_tot = df

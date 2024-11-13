@@ -210,6 +210,7 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
         "n_layers": hp.quniform('num_layers', 2, 5, 1),
         "units": hp.quniform("units", 4, 32, 4),
         "seq_length": hp.quniform("seq_length", 5, 30, 5),
+        "l2_reg": hp.uniform("l2_reg", 0, 2)
     }
 
     best_config_loss = fmin(objective, space, algo=tpe.suggest, max_evals=20)
@@ -321,10 +322,12 @@ def main():
         ticker_data = df.loc[df["ticker"] == ticker, :].copy()
         ticker_data.loc[:, "date"] = ticker_data["sip_timestamp"].dt.date
 
-        best_config, config_loss_df = tuning_part(ticker_data, date_scheme_val, ticker)
+        # best_config, config_loss_df = tuning_part(ticker_data, date_scheme_val, ticker)
 
-        tot_loss_config_df = pd.concat([tot_loss_config_df, config_loss_df], ignore_index=True)
-        tot_loss_config_df.to_csv("reports/config_space_loss.csv", index=False)
+        # tot_loss_config_df = pd.concat([tot_loss_config_df, config_loss_df], ignore_index=True)
+        # tot_loss_config_df.to_csv("reports/config_space_loss.csv", index=False)
+
+        best_config = {'seq_length': 10, 'n_layers': 2, 'units': 16, 'n_features': 1.0, 'l2_reg': 0.5}
 
         loss_dic = testing_part(ticker_data, date_scheme_test, best_config, loss_dic, ticker)
 

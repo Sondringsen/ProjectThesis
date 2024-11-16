@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 from config import time_freq
 from datetime import time
 
@@ -154,7 +155,7 @@ def remove_features(df: pd.DataFrame):
     df = df.drop(columns=features_to_remove)
 
     return df
-import numpy as np
+
 
 def return_transformation(df: pd.DataFrame):
     """
@@ -168,11 +169,12 @@ def return_transformation(df: pd.DataFrame):
     """
     df["date"] = df["sip_timestamp"].dt.date
     
-    df["mid_price"] = df["mid_price"].replace(0, np.nan)
+    # replaces and forward fills some invalid 0 values (only 2 occurences in entire dataset)
+    df["mid_price"] = df["mid_price"].replace(0, np.nan) 
     df["mid_price"] = df.groupby("date")["mid_price"].ffill()
 
-    df["mid_price_log_return"] = df.groupby("date")["mid_price"].transform(lambda x: np.log(x / x.shift(1)))
-    
+    df["mid_price_log_return"] = df.groupby(by = ["date", "ticker"])["mid_price"].transform(lambda x: np.log(x / x.shift(1)))
+
     df = df.dropna(subset=["mid_price_log_return"]).reset_index(drop=True)
     df = df.drop(columns=["date", "mid_price"])
     

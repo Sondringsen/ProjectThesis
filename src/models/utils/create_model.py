@@ -21,10 +21,17 @@ def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int, l2_
 
     for i in range(n_layers):
         return_sequences = i < n_layers - 1
-        model.add(LSTM(units, activation='relu', return_sequences=return_sequences), regularizers.L2(l2_reg))
+        model.add(
+            LSTM(
+                units, activation='relu', 
+                return_sequences=return_sequences,
+                kernel_regularizer=regularizers.L2(l2_reg), 
+                bias_regularizer=regularizers.L2(l2_reg), 
+                )
+            )
         model.add(BatchNormalization())
 
-    model.add(Dense(1))
+    model.add(Dense(1, kernel_regularizer=regularizers.L2(l2_reg), bias_regularizer=regularizers.L2(l2_reg)))
 
     return model
 
@@ -50,6 +57,6 @@ def create_rnn(n_layers: int, units: int, seq_length: int, n_features: int, l2_r
         model.add(SimpleRNN(units, activation='relu', return_sequences=return_sequences), regularizers.L2(l2_reg))
         model.add(BatchNormalization())
 
-    model.add(Dense(1))
+    model.add(Dense(1, kernel_regularizer=regularizers.L2(l2_reg), bias_regularizer=regularizers.L2(l2_reg)))
 
     return model

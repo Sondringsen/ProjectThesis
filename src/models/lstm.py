@@ -167,6 +167,7 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
         nonlocal config_space
         nonlocal config_loss
         config = {key: int(value) for key, value in config.items()} # the lstm only accepts dtype int, not np.int
+        config["seq_length"] = 60
         
         config_space[config_key] = config
         config_key += 1
@@ -180,20 +181,25 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
             train = train.drop(columns=["ticker", "sip_timestamp"])
             val = val.drop(columns=["ticker", "sip_timestamp"])
 
-            train.loc[:, train.columns != "date"] = scaler.fit_transform(train.loc[:, train.columns != "date"])
-            val.loc[:, val.columns != "date"] = scaler.transform(val.loc[:, val.columns != "date"])
+            scaler = StandardScaler()
+            columns_to_standardize = ["mid_price_log_return"]
+
+            for col in columns_to_standardize:
+                scaler.fit(train.loc[train[col] != 0, [col]])
+                train.loc[train[col] != 0, col] = scaler.transform(train.loc[train[col] != 0, [col]])
+                val.loc[val[col] != 0, col] = scaler.transform(val.loc[val[col] != 0, [col]])
 
             X_train, y_train = create_sequences_modified(train, config["seq_length"])
             X_val, y_val = create_sequences_modified(val, config["seq_length"])
 
             config["n_features"] = X_train.shape[2]
 
-            model = create_rnn(**config)
+            model = create_lstm(**config)
             model.compile(optimizer='adam', loss='mse')
 
             early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-            model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=5, batch_size=512, callbacks=[early_stopping], verbose=0)
+            model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=5, batch_size=2048, callbacks=[early_stopping], verbose=0)
             # model.summary()
 
             y_pred = model.predict(X_val)
@@ -209,8 +215,7 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
     space = {
         "n_layers": hp.quniform('num_layers', 2, 5, 1),
         "units": hp.quniform("units", 4, 32, 4),
-        "seq_length": hp.quniform("seq_length", 5, 30, 5),
-        "l2_reg": hp.uniform("l2_reg", 0, 2)
+        "l2_reg": hp.loguniform("l2_reg", 0.0, 10.0),
     }
 
     best_config_loss = fmin(objective, space, algo=tpe.suggest, max_evals=20)
@@ -233,6 +238,7 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
     y_pred_total = np.array([])
 
     config = {key: int(value) for key, value in config.items()} # the lstm only accepts dtype int, not np.int
+    config["seq_length"] = 60
 
     for counter, date_set in enumerate(date_scheme):
         train, test = train_val_test(df, date_set)
@@ -250,18 +256,26 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
         train = train.drop(columns=["ticker", "sip_timestamp"])
         test = test.drop(columns=["ticker", "sip_timestamp"])
 
-        train.loc[:, train.columns != "date"] = scaler.fit_transform(train.loc[:, train.columns != "date"])
-        test.loc[:, test.columns != "date"] = scaler.transform(test.loc[:, test.columns != "date"])
+        scaler = StandardScaler()
+        columns_to_standardize = ["mid_price_log_return"]
+
+        for col in columns_to_standardize:
+            scaler.fit(train.loc[train[col] != 0, [col]])
+            train.loc[train[col] != 0, col] = scaler.transform(train.loc[train[col] != 0, [col]])
+            test.loc[test[col] != 0, col] = scaler.transform(test.loc[test[col] != 0, [col]])
+
+        # train.loc[:, train.columns != "date"] = scaler.fit_transform(train.loc[:, train.columns != "date"])
+        # test.loc[:, test.columns != "date"] = scaler.transform(test.loc[:, test.columns != "date"])
 
         X_train, y_train = create_sequences_modified(train, config["seq_length"])
         X_test, y_test = create_sequences_modified(test, config["seq_length"])
 
         config["n_features"] = X_train.shape[2]
 
-        model = create_rnn(**config)
+        model = create_lstm(**config)
         model.compile(optimizer='adam', loss='mse')
 
-        model.fit(X_train, y_train, epochs=10, batch_size=512, verbose=0)
+        model.fit(X_train, y_train, epochs=10, batch_size=2048, verbose=0)
         model.summary()
         model.save(f"reports/models/{ticker}-{counter}.keras")
 
@@ -299,7 +313,7 @@ def main():
     tickers = df["ticker"].unique()
     date_scheme = get_dates_for_training_scheme(df)
 
-    num_days_testing = 4
+    num_days_testing = 6
     date_scheme_val = date_scheme[:-num_days_testing]
     date_scheme_test = date_scheme[-num_days_testing:]
 
@@ -322,12 +336,10 @@ def main():
         ticker_data = df.loc[df["ticker"] == ticker, :].copy()
         ticker_data.loc[:, "date"] = ticker_data["sip_timestamp"].dt.date
 
-        # best_config, config_loss_df = tuning_part(ticker_data, date_scheme_val, ticker)
+        best_config, config_loss_df = tuning_part(ticker_data, date_scheme_val, ticker)
 
-        # tot_loss_config_df = pd.concat([tot_loss_config_df, config_loss_df], ignore_index=True)
-        # tot_loss_config_df.to_csv("reports/config_space_loss.csv", index=False)
-
-        best_config = {'seq_length': 10, 'n_layers': 2, 'units': 16, 'n_features': 1.0, 'l2_reg': 0.5}
+        tot_loss_config_df = pd.concat([tot_loss_config_df, config_loss_df], ignore_index=True)
+        tot_loss_config_df.to_csv("reports/config_space_loss.csv", index=False)
 
         loss_dic = testing_part(ticker_data, date_scheme_test, best_config, loss_dic, ticker)
 
@@ -337,7 +349,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # is currently running RNNs
+    # is currently running LSTMs
     main()
     
     

@@ -16,6 +16,13 @@ def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int, l2_
     Returns:
         tf.keras.Sequential: A model with the specified number of LSTM layers.
     """
+    # something wrong with the keras which make it not accept numpy ints
+    n_layers = int(n_layers)
+    units = int(units)
+    seq_length = int(seq_length)
+    n_features = int(n_features)
+
+
     model = Sequential()
     model.add(Input(shape=(seq_length, n_features)))
 
@@ -23,7 +30,8 @@ def create_lstm(n_layers: int, units: int, seq_length: int, n_features: int, l2_
         return_sequences = i < n_layers - 1
         model.add(
             LSTM(
-                units, activation='relu', 
+                units, 
+                activation='relu', 
                 return_sequences=return_sequences,
                 kernel_regularizer=regularizers.L2(l2_reg), 
                 bias_regularizer=regularizers.L2(l2_reg), 
@@ -49,6 +57,12 @@ def create_rnn(n_layers: int, units: int, seq_length: int, n_features: int, l2_r
     Returns:
         tf.keras.Sequential: A model with the specified number of RNN layers.
     """
+    # something wrong with the keras which make it not accept numpy ints
+    n_layers = int(n_layers)
+    units = int(units)
+    seq_length = int(seq_length)
+    n_features = int(n_features)
+    
     model = Sequential()
     model.add(Input(shape=(seq_length, n_features)))
 

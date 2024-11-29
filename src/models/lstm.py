@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from utils.create_model import create_lstm, create_rnn
 from hyperopt import hp, fmin, tpe, space_eval
 from tensorflow.keras.callbacks import EarlyStopping
+from keras.optimizers import Adam
 
 def get_data():
     """
@@ -167,7 +168,7 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
         nonlocal config_space
         nonlocal config_loss
 
-        config["seq_length"] = 60
+        config["seq_length"] = 12
         
         config_space[config_key] = config
         config_key += 1
@@ -182,7 +183,7 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
             val = val.drop(columns=["ticker", "sip_timestamp"])
 
             scaler = StandardScaler()
-            columns_to_standardize = ["mid_price_log_return"]
+            columns_to_standardize = train.columns[:-1] # standardize all columns except date
 
             for col in columns_to_standardize:
                 scaler.fit(train.loc[train[col] != 0, [col]])
@@ -194,12 +195,15 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
 
             config["n_features"] = X_train.shape[2]
 
-            model = create_lstm(**config)
-            model.compile(optimizer='adam', loss='mse')
+            lstm_config = config.copy()
+            del lstm_config["lr"]
+
+            model = create_lstm(**lstm_config)
+            model.compile(optimizer=Adam(learning_rate=config["lr"]), loss='mse')
 
             early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-            model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=5, batch_size=2048, callbacks=[early_stopping], verbose=0)
+            model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=100, batch_size=1024, callbacks=[early_stopping], verbose=False)
 
             y_pred = model.predict(X_val)
 
@@ -214,10 +218,11 @@ def tuning_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], ti
     space = {
         "n_layers": hp.quniform('num_layers', 2, 5, 1),
         "units": hp.quniform("units", 4, 32, 4),
-        "l2_reg": hp.loguniform("l2_reg", np.log(1e-10), np.log(10)),
+        "l2_reg": hp.loguniform("l2_reg", np.log(1e-5), np.log(100)),
+        "lr": hp.loguniform("lr", np.log(1e-8), np.log(1)),
     }
 
-    best_config_loss = fmin(objective, space, algo=tpe.suggest, max_evals=10)
+    best_config_loss = fmin(objective, space, algo=tpe.suggest, max_evals=20)
 
     config_loss_df = pd.DataFrame().from_dict(config_space, orient="index")
     config_loss_df["mse"] = config_loss
@@ -236,7 +241,7 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
     y_test_total = np.array([])
     y_pred_total = np.array([])
 
-    config["seq_length"] = 60
+    config["seq_length"] = 12
 
     for counter, date_set in enumerate(date_scheme):
         train, test = train_val_test(df, date_set)
@@ -255,7 +260,7 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
         test = test.drop(columns=["ticker", "sip_timestamp"])
 
         scaler = StandardScaler()
-        columns_to_standardize = ["mid_price_log_return"]
+        columns_to_standardize = train.columns[:-1] # standardize all columns except date
 
         for col in columns_to_standardize:
             scaler.fit(train.loc[train[col] != 0, [col]])
@@ -270,10 +275,16 @@ def testing_part(df: pd.DataFrame, date_scheme: tuple[np.ndarray, np.ndarray], c
 
         config["n_features"] = X_train.shape[2]
 
-        model = create_lstm(**config)
-        model.compile(optimizer='adam', loss='mse')
+        lstm_config = config.copy()
+        del lstm_config["lr"]
+        
+        model = create_lstm(**lstm_config)
 
-        model.fit(X_train, y_train, epochs=10, batch_size=2048, verbose=0)
+        model.compile(optimizer=Adam(learning_rate=config["lr"]), loss='mse')
+
+        early_stopping = EarlyStopping(monitor='loss', patience=5, restore_best_weights=True)
+        model.fit(X_train, y_train, epochs=100, batch_size=1024, callbacks=[early_stopping], verbose=0)
+
         model.summary()
         model.save(f"reports/models/{ticker}-{counter}.keras")
 

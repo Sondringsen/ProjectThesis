@@ -1,1 +1,1 @@
-time_freq = 1
+time_freq = 5

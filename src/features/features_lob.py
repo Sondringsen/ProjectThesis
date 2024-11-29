@@ -137,8 +137,8 @@ def add_features(df: pd.DataFrame):
     """
     # df = add_first_hour_indicator(df)
     # df = add_last_hour_indicator(df)
-    df = add_mid_price(df)
-    # df = add_weighted_mid_price(df)
+    # df = add_mid_price(df)
+    df = add_weighted_mid_price(df)
     return df
 
 def remove_features(df: pd.DataFrame):
@@ -151,7 +151,7 @@ def remove_features(df: pd.DataFrame):
     Returns:
         pd.DataFrame: dataframe with removed features
     """
-    features_to_remove = ["ask_price", "bid_price", "ask_size", "bid_size", "last_trade_price", "last_trade_size"]
+    features_to_remove = [" ", " ", "last_trade_price", "last_trade_size"]
     df = df.drop(columns=features_to_remove)
 
     return df
@@ -170,13 +170,17 @@ def return_transformation(df: pd.DataFrame):
     df["date"] = df["sip_timestamp"].dt.date
     
     # replaces and forward fills some invalid 0 values (only 2 occurences in entire dataset)
-    df["mid_price"] = df["mid_price"].replace(0, np.nan) 
-    df["mid_price"] = df.groupby("date")["mid_price"].ffill()
+    columns_to_transfrom = ["mid_price", "ask_price", "bid_price", "weighted_mid_price"]
 
-    df["mid_price_log_return"] = df.groupby(by = ["date", "ticker"])["mid_price"].transform(lambda x: np.log(x / x.shift(1)))
+    for column in columns_to_transfrom:
+        df[column] = df[column].replace(0, np.nan) 
+        df[column] = df.groupby("date")[column].ffill()
 
-    df = df.dropna(subset=["mid_price_log_return"]).reset_index(drop=True)
-    df = df.drop(columns=["date", "mid_price"])
+        df[f"{column}_log_return"] = df.groupby(by = ["date", "ticker"])[column].transform(lambda x: np.log(x / x.shift(1)))
+
+        df = df.dropna(subset=[f"{column}_log_return"]).reset_index(drop=True)
+
+    df = df.drop(columns=["date"] + columns_to_transfrom)
     
     return df
 
@@ -219,7 +223,6 @@ def main_already_merged():
             df = pd.read_csv(input_filepath)
             df = process_single_file(df)
             
-
             if df_tot is None:
                 df_tot = df
             else:

@@ -340,6 +340,8 @@ def main():
     for ticker in tickers:
         if ticker in loss_dic["ticker"]:
             continue
+        if ticker == "HFBL":
+            continue
         
         print(ticker)
         ticker_data = df.loc[df["ticker"] == ticker, :].copy()

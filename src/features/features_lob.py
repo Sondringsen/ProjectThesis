@@ -137,7 +137,7 @@ def add_features(df: pd.DataFrame):
     """
     # df = add_first_hour_indicator(df)
     # df = add_last_hour_indicator(df)
-    # df = add_mid_price(df)
+    df = add_mid_price(df)
     df = add_weighted_mid_price(df)
     return df
 
@@ -151,7 +151,7 @@ def remove_features(df: pd.DataFrame):
     Returns:
         pd.DataFrame: dataframe with removed features
     """
-    features_to_remove = [" ", " ", "last_trade_price", "last_trade_size"]
+    features_to_remove = ["bid_price", "ask_price", "last_trade_price", "last_trade_size"]
     df = df.drop(columns=features_to_remove)
 
     return df
@@ -170,7 +170,7 @@ def return_transformation(df: pd.DataFrame):
     df["date"] = df["sip_timestamp"].dt.date
     
     # replaces and forward fills some invalid 0 values (only 2 occurences in entire dataset)
-    columns_to_transfrom = ["mid_price", "ask_price", "bid_price", "weighted_mid_price"]
+    columns_to_transfrom = ["mid_price", "weighted_mid_price"]
 
     for column in columns_to_transfrom:
         df[column] = df[column].replace(0, np.nan) 
